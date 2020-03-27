@@ -26,7 +26,7 @@ bool HAS_HOMED = false;
 bool HAS_ERRORED = false;
 bool reach_HOME=true;
 
-byte current_direction = 0;
+byte current_direction = 1;
 
 unsigned short ai_low = 32; //10-bit input, leave some slop on the low end
 unsigned short ai_high = 992; //10-bit input, leave some slop on the high end
@@ -52,9 +52,11 @@ unsigned short delay_time = 1000;
 
 void limit_switch_home() {
 
-  motor.setSpeed(0); //brake
+  if(!current_direction){
+    motor.setSpeed(0); //brake
+  }
 
-  ERROR_FLAG = true;
+  //ERROR_FLAG = true;
   HAS_HOMED = true;
     //SOUND ALARM?
 }
@@ -79,7 +81,7 @@ bool calibrate_home() {
   while (!HAS_HOMED) {
     if (timeout < 100) {
       motor.setSpeed(-current_speed);
-      delay(50);
+      delay(10);
     } else {
       return false;
     }
@@ -116,7 +118,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(LIMIT_HOME), limit_switch_home, FALLING);
 
   motor.setSpeed(255); //FORWARD
-  delay(1000);
+  delay(500);
   CALIBRATION = true;
 
   HAS_HOMED = false;
@@ -141,9 +143,9 @@ void loop() {
       volume_val = constrain(volume_val, ai_low, ai_high); //Constrain with the analog input bands
       current_volume = volume_val * (volume_slope) + volume_offset;; //Constrain with the analog input bands
       //current_volume = map_analog_value(volume_val, volume_slope, volume_offset);
-      current_volume = constrain(current_volume, volume_low, volume_high);
-      //Serial.println("Analog value on the volume  is ");
-      //Serial.println(current_volume);
+      current_volume = max(200,current_volume);//, 200, volume_high);
+      Serial.print("Analog value on the volume  is ");
+      Serial.println(current_volume);
       //Serial.println("\n ");
     }
   
@@ -152,31 +154,33 @@ void loop() {
       unsigned short speed_val = analogRead(BREATH_RATE_AI);
       speed_val = constrain(speed_val, ai_low, ai_high); //Constrain with the analog input bands
       delay_time = speed_val * (delay_slope) + delay_intercept;
-      
-      //Serial.println("Analog value on the rate in milliseconds is ");
-      //Serial.println(delay_time);
-      //Serial.println("\n ");
-  
+      Serial.print("Analog value on the delay  is ");
+      Serial.println(delay_time);
       speed_val = analogRead(ARM_SPEED_AI);
       speed_val = constrain(speed_val, ai_low, ai_high); //Constrain with the analog input bands
-      current_speed = speed_val * (delay_slope) + delay_intercept;
+      current_speed = speed_val * (arm_speed_slope) + arm_speed_offset;
+      Serial.print("Analog value on the speed  is ");
+      Serial.println(current_speed);
     }
   
   
   
     if (!ERROR_FLAG) {
+      current_direction =1;
       motor.setSpeed(current_speed); //FORWARD
       delay(current_volume);
-  
+
       motor.setSpeed(0); //STOP
       delay(100);
   
       reach_HOME=true;
       HAS_HOMED = false;
+      current_direction=0;
       while (reach_HOME) {
            reach_HOME =!calibrate_home();
       }
       motor.setSpeed(0); //STOP
+      current_direction=1;
       delay(delay_time);
     }
   
