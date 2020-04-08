@@ -7,7 +7,9 @@
 #define VENT_SERVO_H
 
 #include <LabThings.h>
-#include <Servo.h>
+//#include <Servo.h>
+#include <ESP32Servo.h>
+
 
 // state ids:
 // 0: home
@@ -31,7 +33,7 @@ class VentServo : public LT_Device {
     Servo m_servo;
 
     //< keep track if the machine is running
-    volatile bool m_running = false;
+    bool m_running = false;
 
     //< wiring
     const int M_SERVO_PIN; //< the pin the servo is attached to
@@ -70,24 +72,22 @@ class VentServo : public LT_Device {
     //< the time in microseconds that the current state is scheduled to last
     uint32_t m_state_duration;
 
-    float m_volume = 800.0; //< the tidal volume in cc [200-800]
-    float m_total_volume = 800.0; //< max tidal volume a full stroke (800 cc)
+    float m_volume = 800.0; //< the tidal volume. a full stroke is 800 cc
     
 
     uint32_t m_inhale_period = 1000000; //< period for inhale in us
     uint32_t m_exhale_period = 1000000; //< period for exhale in us
     uint32_t m_breath_period = 4000000; //< period for one breath in us
 
-    /*! 
-     * check if the motor is at the target position
-     * returns true if (measured position - target position) < tolerance
+    /*! check if the motor is at the target position
+       returns true if (measured position - target position) < tolerance
     */
     bool checkTarget(int target) {
       m_current_feedback = analogRead(M_FEEDBACK_PIN);
-        /*Serial.print("Read: ");
+        Serial.print("Read: ");
         Serial.print(m_current_feedback);
         Serial.print(" Expected: ");
-        Serial.println(target);*/
+        Serial.println(target);
       if (abs(m_current_feedback - target) > m_tolerance) {
         Serial.println("Position error");
         return false;
@@ -105,15 +105,15 @@ class VentServo : public LT_Device {
       pinMode(M_SERVO_PIN, OUTPUT);
       m_servo.attach(M_SERVO_PIN, 1000, 2000);
       pinMode(M_FEEDBACK_PIN, INPUT);
-      //Serial.print("servo start pin");
-      //Serial.println(M_SERVO_PIN);
+      Serial.print("servo start pin");
+      Serial.println(M_SERVO_PIN);
     }
 
     void update() {
 
       if (m_running) {
         uint32_t dt = LT_current_time_us - m_state_start;
-        if(dt < 1000) { // at max check every 1 millisecond
+        if(dt < 10000) { // at max check every 10 millisecond
           return;
         }
         int32_t last_duration = m_state_duration;
@@ -133,7 +133,7 @@ class VentServo : public LT_Device {
           }
           case State_ExEnd: {
             // start inhaling
-            //Serial.println("Inhale");
+            Serial.println("Inhale");
             checkTarget(m_target_feedback_last);
             m_current_state = State_Inhale;
             m_state_duration = m_inhale_period;
@@ -145,7 +145,7 @@ class VentServo : public LT_Device {
           }
           case State_Inhale: {
             // end inhalation
-            //Serial.println("Paused");
+            Serial.println("Paused");
             m_current_state = State_InEnd;
             m_state_duration = (m_breath_period - m_inhale_period - m_exhale_period) >> 1; //< half
             m_target_position_last = m_position_inhale_end;
@@ -156,7 +156,7 @@ class VentServo : public LT_Device {
           }
           case State_InEnd: {
             // start exhaling
-            //Serial.println("Exhale");
+            Serial.println("Exhale");
             checkTarget(m_target_feedback_last);
             m_current_state = State_Exhale;
             m_state_duration = m_exhale_period;
@@ -168,7 +168,7 @@ class VentServo : public LT_Device {
           }
           case State_Exhale: {
             // end exhalation
-            //Serial.println("Pause");
+            Serial.println("Pause");
             m_current_state = State_ExEnd;
             m_state_duration = (m_breath_period - m_inhale_period - m_exhale_period) >> 1; //< half
             m_target_position_last = m_position_exhale_end;
@@ -183,11 +183,8 @@ class VentServo : public LT_Device {
       else {
         // this should run every few milliseconds
         // interpolate the next target position
-        lerpPw();
-        int32_t expected_feedback = (  ( (int32_t)dt * (m_target_feedback - m_target_feedback_last) ) / (int32_t)m_state_duration) + m_target_feedback_last;
-        checkTarget(expected_feedback);
-       /* int pw = ( ( (int32_t)dt * (m_target_position - m_target_position_last) ) / (int32_t)m_state_duration) + m_target_position_last;
-        setPulseWidth(pw);*/
+        int pw = ( ( (int32_t)dt * (m_target_position - m_target_position_last) ) / (int32_t)m_state_duration) + m_target_position_last;
+        setPulseWidth(pw);
         /*
         Serial.print("dt: ");
         Serial.print(dt/1000);
@@ -224,16 +221,6 @@ class VentServo : public LT_Device {
       // not running, do nothing
     }
   } //update
-
-  void lerpPw() {
-    if(m_running) {
-      uint32_t dt = LT_current_time_us - m_state_start;
-      int pw = ( ( (int32_t)dt * (m_target_position - m_target_position_last) ) / (int32_t)m_state_duration) + m_target_position_last;
-      setPulseWidth(pw);
-      //Serial.print("\tset pw: ");
-      //Serial.println(pw);
-    }
-  }
   
   // breath/min
   // 1breath/min *1min/60sec * 1000000us/1sec = breath / us
@@ -244,21 +231,15 @@ class VentServo : public LT_Device {
     }
 
     void setVolume(const float volume) {
-      m_volume = volume;
-      Serial.print("Set volume");
-      Serial.println(m_volume);
+      
     }
 
     void setInspiratoryPeriod(const float ip) {
       m_inhale_period = ip * 1000000;
-      Serial.print("Set ip");
-      Serial.println(m_inhale_period);
     }
 
     void setExpiratoryPeriod(const float xp) {
       m_exhale_period = xp * 1000000;
-      Serial.print("Set xp");
-      Serial.println(m_exhale_period);
     }
 
     void setRunning(const bool is_running) {

@@ -2,8 +2,8 @@
  * Bridge Ventilator Software Demonstration
  * 
  * Hardware:
- * Arduino Mega
- * KS0108 128x64px GLCD
+ * ESP32
+ * SSD1306 128x64px OLED
  * Rotary Encoder with pushbutton
  * Piezo Buzzer
  * 1/4 Scale Hobby Servo
@@ -25,7 +25,6 @@
 #include <LabThings.h>
 #include "vent_servo.h"
 
-/// Define parameter limits
 const float MIN_IP = 0.5;
 const float MIN_XP = 0.5;
 const float MIN_RR = 2;
@@ -33,10 +32,29 @@ const float MAX_RR = 40;
 const float MIN_VOL = 200.0;
 const float MAX_VOL = 800.0;
 
-// a device manager with support for up to 6 devices
-DeviceManager<6> device_manager;
 
-LT_Buzzer buzzer(device_manager.registerDevice(), 9);
+template <typename T>
+class SelectableScreen : public InputScreen<T> {
+  bool m_selected = false;
+  public:
+    SelectableScreen(MenuScreen* parent, UiContext* context, const char* title, 
+    T min_value = 0, T max_value = 100, T value_step = 1, char* suffix = nullptr              )
+      : InputScreen<T>(parent, context, title, min_value, max_value, value_step, suffix) {
+    }
+    void setSelected(const bool is_selected) { 
+      m_selected = is_selected;
+      MenuScreen::setDirty(true);
+      }
+    void draw(UiContext* context) {
+      if(m_selected) {
+        context->display->drawFrame(0,0,128,64);
+      }
+      InputScreen<T>::draw(context);
+    }
+};
+
+#define N_DEVICES 8
+DeviceManager<N_DEVICES> device_manager;
 
 // the mesenger handles sends ascii messages over the serial port
 ASCIISerial messenger(Serial);
@@ -44,20 +62,19 @@ ASCIISerial messenger(Serial);
 // the message handler allows callbacks to be attached to messages
 MessageHandler handler;
 
-// constructor for a 128x64px KS0108 GLCD display
-U8G2_KS0108_128X64_F u8g2(U8G2_R2, 22, 23, 24, 25, 26, 27, 28, 29, /*en=*/ 34, /*dc=*/ 35, /*cs0=*/ 39, /*cs1=*/ 38, /*cs2=*/ U8X8_PIN_NONE, /* reset=*/  40); // Set R/W to low!
+LT_Buzzer buzzer(device_manager.registerDevice(), 2, 0);
 
-// create a context object from the display object
-UiContext context(&u8g2);
 
-// declare the user interface device and register with device manager
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C disp1(U8G2_R0, /* clock=*/ 22, /* data=*/ 21, /* reset=*/ U8X8_PIN_NONE);   // All Boards without Reset of the Display
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C disp2(U8G2_R0, /* clock=*/ 23, /* data=*/ 19, /* reset=*/ U8X8_PIN_NONE);   // All Boards without Reset of the Display
+
+UiContext context(&disp1, 4);
+UiContext context2(&disp2, 4);
 Ui ui(device_manager.registerDevice(), &context);
+Ui ui2(device_manager.registerDevice(), &context2);
 
-// a rotary encoder on pins 19 adn 20 with pullups enabled
-LT_Encoder encoder(device_manager.registerDevice(), 19, 20, true);
-
-// a pushbutton (part of the encoder) on pin 21 with pullup enabled
-LT_DebouncedButton button(device_manager.registerDevice(), 21, true);
+LT_Encoder encoder(device_manager.registerDevice(), 33, 32, true);
+LT_DebouncedButton button(device_manager.registerDevice(), 27, true);
 
 // declare all the ui elements
 MainMenu<7> screen_main(NULL, &context, "Main Menu", 0x41);
@@ -85,27 +102,27 @@ InputScreen<int> screen_home(&screen_setup, &context, "Set Home", 1000, 2000, 50
 InputScreen<int> screen_exhale(&screen_setup, &context, "Set Exhale Stop", 1000, 2000, 50, " [us]");
 InputScreen<int> screen_inhale(&screen_setup, &context, "Set Inhale Stop", 1000, 2000, 50, " [us]");
 
-VentServo servo(device_manager.registerDevice(), 5, A5);
+VentServo servo(device_manager.registerDevice(), 14, 12);
 
 LT_Timer timer(device_manager.registerDevice(), 50000);
 
-// ISR
-void onEncoderInterrupt() {
-  encoder.handleInterrupt();
+//SelectableScreen<float>* selected_screen = &screen_rate;
+
+void IRAM_ATTR onEncoderInterrupt() {
+    encoder.handleInterrupt();
 }
 
-void onBtnInterrupt() {
-  button.handleInterrupt();
+void IRAM_ATTR onBtnInterrupt() {
+    button.handleInterrupt();
 }
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
   encoder.setValueChangedCallback(onEncoderValueChanged);
-  encoder.setDebounceInterval(200000);
-  button.setButtonPressedCallback(onButtonReleased);
-  button.setDebounceInterval(250000);
-  
+  encoder.setDebounceInterval(200000); // 100 ms
+  button.setButtonReleasedCallback(onButtonReleased);
+  button.setDebounceInterval(250000); // 100 ms
+
   ui.setCurrentScreen(&screen_main);
   ui.setScreenSaverEnabled(false);
 
@@ -129,15 +146,15 @@ void setup() {
   screen_xp.setPrecision(1);
 
   screen_home.setValueChangedCallback(onHomeChanged);
-  screen_home.setScreenEnteredCallback(onHomeChanged);
+  //screen_home.setScreenEnteredCallback(onHomeChanged);
   screen_home.setValue(2000, false);
 
   screen_exhale.setValueChangedCallback(onExhaleChanged);
-  screen_exhale.setScreenEnteredCallback(onExhaleChanged);
+  //screen_exhale.setScreenEnteredCallback(onExhaleChanged);
   screen_exhale.setValue(1750, false);
 
   screen_inhale.setValueChangedCallback(onInhaleChanged);
-  screen_inhale.setScreenEnteredCallback(onInhaleChanged);
+  //screen_inhale.setScreenEnteredCallback(onInhaleChanged);
   screen_inhale.setValue(1000, false);
 
   text_rate.setPos(0, 8);
@@ -176,9 +193,9 @@ void setup() {
   device_manager.attachDevice(&servo);
   device_manager.attachDevice(&timer);
 
-  attachInterrupt(digitalPinToInterrupt(19), onEncoderInterrupt, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(20), onEncoderInterrupt, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(21), onBtnInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(33), onEncoderInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(32), onEncoderInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(27), onBtnInterrupt, CHANGE);
 
   messenger.setMessageReceivedCallback(onMessageReceived);
   // setup message handler callbacks
@@ -186,29 +203,20 @@ void setup() {
 
   graph.setGraphType(LT::LineGraph);
   timer.setCallback(onTimerTimeout);
-  timer.start();
+  //timer.start();
 
-  // setup timer0 interrupt (gets called every 1 ms)
-  //OCR0A = 0xAF;
-  //TIMSK0 |= _BV(OCIE0A);
-
-  Serial.println("Startup complete");
-}
-
-SIGNAL(TIMER0_COMPA_vect) 
-{
-  //LT_current_time_us = micros();
-  //servo.lerpPw();
+  Serial.println("Hello world");
+  
 }
 
 void loop() {
-  messenger.update();
+  // put your main code here, to run repeatedly:
   device_manager.update();
 }
 
 // simulate sampling pressure data for graph
 void onTimerTimeout() {
-  float ts = LT_current_time_us/1000000.0; // current time in seconds
+  float ts = LT_current_time_us/1000000.0;
   graph.addDataPoint(ts, 10 * sin(0.785 * ts));
 }
 
@@ -222,7 +230,7 @@ void onMessageReceived(int msg_id) {
   buzzer.setActive(is_active);
 }
 
-void onGoTo() {
+void onGoTo(void*) {
   int pw = messenger.getNextArgInt();
   servo.setPulseWidth(pw);
   Serial.print("Set pulse width to:");
