@@ -38,14 +38,14 @@ class VentServo : public LT_Device {
     const int M_FEEDBACK_PIN; //< the pin the servo is attached to
 
     //< the servo pulsewidth for each state in microseconds [1000, 2000]
-    int m_position_home = 2000; //< servo home position [pulsewidth, units = microseconds (1000-2000)]
-    int m_position_exhale_end = 1750; //< servo position at the end of exhalation [units = microseconds]
-    int m_position_inhale_end = 1000; //< servo position at the end of inhalation  [units = microseconds]
+    int m_position_home = 1000; //< servo home position [pulsewidth, units = microseconds (1000-2000)]
+    int m_position_exhale_end = 1250; //< servo position at the end of exhalation [units = microseconds]
+    int m_position_inhale_end = 1750; //< servo position at the end of inhalation  [units = microseconds]
 
     //< the feedback data for each state in counts [0-1023]
-    int m_feedback_home = 157; //< servo home position [units = counts (0-1023)]
+    int m_feedback_home = 345; //< servo home position [units = counts (0-1023)]
     int m_feedback_exhale_end = 203; //< servo position at the end of exhalation [units = counts]
-    int m_feedback_inhale_end = 345; //< servo position at the end of inhalation  [units = counts]
+    int m_feedback_inhale_end = 157; //< servo position at the end of inhalation  [units = counts]
 
     //< the maximum allowable error in feedback measurement [units = counts]
     int m_tolerance = 8; // 1 count is about 2 degrees

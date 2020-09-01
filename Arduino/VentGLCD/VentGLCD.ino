@@ -33,8 +33,41 @@ const float MAX_RR = 40;
 const float MIN_VOL = 200.0;
 const float MAX_VOL = 800.0;
 
-// a device manager with support for up to 6 devices
-DeviceManager<6> device_manager;
+
+#include <HoneywellTruStabilitySPI.h>
+/**************** Wrapper Class ****************/
+/* Define a class that inherits from the sensor's library and from LT_Sensor 
+ * Using LT_Sensor instead of LT_Device adds polling and data callback features 
+*/
+class LT_SPISensor : public TruStabilityPressureSensor, public LT_Sensor {
+
+  public:
+    // The constructor calls the sensor library constructor
+    LT_SPISensor(const int id, uint8_t ss_pin, float p_min, float p_max)  :
+    TruStabilityPressureSensor(ss_pin, p_min, p_max), LT_Sensor(id) {}
+
+    // Subclasses of LT_Device must implement type()
+    LT::DeviceType type() const { return (LT::DeviceType)(LT::UserType + 1); }
+
+    // begin() implements library-specific initialization 
+    void begin() {
+      TruStabilityPressureSensor::begin();
+    }
+
+    // override readSensor() to let the Lab Things device manager poll the sensor
+    uint8_t readSensor() {
+      // TruStabilityPressureSensor::readSensor() returns 0 when new data is available
+      // when readSensor() returns 0 to the base class, the new data callback is executed
+      return TruStabilityPressureSensor::readSensor();
+    }
+    
+};
+
+#define SLAVE_SELECT_PIN SS
+TruStabilityPressureSensor sensor( SLAVE_SELECT_PIN, -15.0, 15.0 );
+
+// a device manager with support for up to 8 devices
+DeviceManager<8> device_manager;
 
 LT_Buzzer buzzer(device_manager.registerDevice(), 9);
 
@@ -87,7 +120,7 @@ InputScreen<int> screen_inhale(&screen_setup, &context, "Set Inhale Stop", 1000,
 
 VentServo servo(device_manager.registerDevice(), 5, A5);
 
-LT_Timer timer(device_manager.registerDevice(), 50000);
+LT_SPISensor pressure_sensor(device_manager.registerDevice(), SS, -15.0, 15.0);
 
 // ISR
 void onEncoderInterrupt() {
@@ -174,7 +207,7 @@ void setup() {
   device_manager.attachDevice(&button);
   device_manager.attachDevice(&ui);
   device_manager.attachDevice(&servo);
-  device_manager.attachDevice(&timer);
+  device_manager.attachDevice(&pressure_sensor);
 
   attachInterrupt(digitalPinToInterrupt(19), onEncoderInterrupt, CHANGE);
   attachInterrupt(digitalPinToInterrupt(20), onEncoderInterrupt, CHANGE);
@@ -185,20 +218,25 @@ void setup() {
   handler.attachFunction(1, onGoTo);
 
   graph.setGraphType(LT::LineGraph);
-  timer.setCallback(onTimerTimeout);
-  timer.start();
+  
+  pressure_sensor.setPolling(true);
+  pressure_sensor.setPollingInterval(100000); // 10ms
+  pressure_sensor.setNewDataCallback(onNewSensorData);
 
   // setup timer0 interrupt (gets called every 1 ms)
-  //OCR0A = 0xAF;
-  //TIMSK0 |= _BV(OCIE0A);
+  OCR0A = 0xAF;
+  TIMSK0 |= _BV(OCIE0A);
+
+  SPI.begin(); // start SPI communication
+  sensor.begin(); // run sensor initialization
 
   Serial.println("Startup complete");
 }
 
 SIGNAL(TIMER0_COMPA_vect) 
 {
-  //LT_current_time_us = micros();
-  //servo.lerpPw();
+  LT_current_time_us = micros();
+  servo.lerpPw();
 }
 
 void loop() {
@@ -207,9 +245,11 @@ void loop() {
 }
 
 // simulate sampling pressure data for graph
-void onTimerTimeout() {
-  float ts = LT_current_time_us/1000000.0; // current time in seconds
-  graph.addDataPoint(ts, 10 * sin(0.785 * ts));
+void onNewSensorData() {
+  float p_cmh2o = pressure_sensor.pressure() * 70.307;
+  float ts = pressure_sensor.lastSampleTime()/1000000.0;
+  graph.addDataPoint(ts, p_cmh2o);
+  Serial.println(p_cmh2o);
 }
 
 // send the message id to the handler
@@ -285,16 +325,19 @@ void onExhalePeriodChanged() {
 
 //*****Callbacks for position calibration*****//
 void onHomeChanged() {
+  screen_start.setValue(0);
   int value = screen_home.value();
   servo.calibrateHome(value);
 }
 
 void onExhaleChanged() {
+  screen_start.setValue(0);
   int value = screen_exhale.value();
   servo.calibrateExhaleEnd(value);
 }
 
 void onInhaleChanged() {
+  screen_start.setValue(0);
   int value = screen_inhale.value();
   servo.calibrateInhaleEnd(value);
 }
@@ -321,15 +364,6 @@ void onEncoderValueChanged() {
     ui.decrement();
   }*/
   last_value = value;
-}
-
-void onReadSensorValue(void*) {
- // if (temp_sensor.readSensor() == 0) {
-    //onNewSensorData();
-  //}
- // else {
-  //  printError((const char *)LT::Read_Sensor_Value);
-  //}
 }
 
 void onError() {
